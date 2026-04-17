@@ -4,7 +4,8 @@
 作業時に守ってほしい前提を以下にまとめます。
 
 ## 前提
-- API キーは `.env` の `RAKUTEN_APP_ID` から読む。コードに直書きしない。
+- API 認証情報は `.env` の `RAKUTEN_APP_ID` と `RAKUTEN_ACCESS_KEY` から読む。コードに直書きしない。
+- 楽天 API は 2025年現行の `openapi.rakuten.co.jp` エンドポイントを使用。
 - 楽天 API は公式のみ使用。スクレイピングはしない。
 - raw データ(`data/raw/`)は消さない。再実験・再整形のために保持する。
 

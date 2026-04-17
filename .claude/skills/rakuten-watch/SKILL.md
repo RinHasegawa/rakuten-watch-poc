@@ -30,9 +30,9 @@ cp .env.example .env
 
 **③ API キーの確認**
 ```bash
-.venv/bin/python -c "from dotenv import load_dotenv; import os; load_dotenv(); v=os.getenv('RAKUTEN_APP_ID',''); print('OK' if v and v != 'your_application_id_here' else 'NG')"
+.venv/bin/python -c "from dotenv import load_dotenv; import os; load_dotenv(); a=os.getenv('RAKUTEN_APP_ID',''); k=os.getenv('RAKUTEN_ACCESS_KEY',''); print('OK' if a and k and 'your_' not in a else 'NG')"
 ```
-`OK` が返れば次へ進む。`NG` の場合は「`.env` の `RAKUTEN_APP_ID` を設定してください」とユーザーに伝えて止まる。
+`OK` が返れば次へ進む。`NG` の場合は「`.env` の `RAKUTEN_APP_ID` / `RAKUTEN_ACCESS_KEY` を確認してください」とユーザーに伝えて止まる。
 
 ---
 
