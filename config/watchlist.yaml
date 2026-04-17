@@ -22,3 +22,13 @@ reference_items:
     name: "サンプル美容液 30ml"
     price: 3000
     genre_id: 216348
+
+# ブランド類似検索の対象（複数可）
+# name: ブランド名（必須）
+# category: カテゴリ名または商品名のヒント（任意・省略可、検索精度が上がる）
+# ★ ブランド商品をまず検索し、その価格帯・ジャンル・キーワードを分析して類似商品を自動抽出する
+brand_queries:
+  - name: "SK-II"
+    category: "美容液"
+  - name: "ドクターシーラボ"
+    category: ""

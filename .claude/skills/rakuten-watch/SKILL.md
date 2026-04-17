@@ -40,7 +40,7 @@ cp .env.example .env
 ```bash
 .venv/bin/python run_all.py
 ```
-内部で `fetch_ranking.py` → `search_items.py` → `make_report.py` を順に実行し、
+内部で `fetch_ranking.py` → `search_items.py` → `search_brand.py` → `make_report.py` を順に実行し、
 最後にレポート全文を標準出力に表示する。
 
 ### Step 2 — レポート要約
@@ -48,6 +48,7 @@ cp .env.example .env
 以下のポイントをユーザーに日本語で要約する:
 - ランキング Top5 の商品名・価格
 - 類似候補の中でスコアが高い商品(matched_rules つき)
+- ブランド類似候補のスコアが高い商品(matched_rules つき)
 
 ---
 
@@ -56,6 +57,7 @@ cp .env.example .env
 - `genre_ids` … ランキングを取りたい楽天ジャンルID(例: 100939 = 美容・コスメ)
 - `keywords` … 検索語(例: スキンケア、美容液)
 - `reference_items` … 類似判定の基準商品(name / price / genre_id を直接書く)
+- `brand_queries` … ブランド類似検索の対象(name: ブランド名、category: 絞り込みカテゴリ(任意))
 
 ---
 

@@ -34,6 +34,7 @@ def run(script: str) -> None:
 def main() -> None:
     run("fetch_ranking.py")
     run("search_items.py")
+    run("search_brand.py")
     run("make_report.py")
 
     reports = sorted((ROOT / "reports").glob("report_*.md"))
