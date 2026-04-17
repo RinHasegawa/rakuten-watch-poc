@@ -1,0 +1,20 @@
+# 監視対象の宣言ファイル
+# Claude Code から触るのは基本的にここだけ。
+
+# ランキング取得対象の楽天ジャンルID
+# 例: 100939 = 美容・コスメ・香水
+genre_ids:
+  - 100939
+
+# キーワード検索の対象語
+keywords:
+  - スキンケア
+  - 美容液
+
+# 類似候補抽出の基準商品(複数可)
+# id は楽天 itemCode を直接書ける場合は書く。なくても name/price/genre_id があれば動く。
+reference_items:
+  - id: null
+    name: "サンプル美容液 30ml"
+    price: 3000
+    genre_id: 100939
