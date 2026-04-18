@@ -152,47 +152,52 @@ def main() -> None:
         print(f"  プロフィール: price=[{profile['price_min']:,}〜{profile['price_max']:,}円] "
               f"genre_ids={top_genres}")
 
-        # ③ 主要 genre_id で候補検索（genre_id ごとにカテゴリキーワードで検索）
-        candidates_raw_items: list[dict[str, Any]] = []
-        for gid in top_genres:
-            # genre_id を使った絞り込みは Search API の genreId パラメータで行う
-            # 現行 search_items() は keyword のみ対応のため、ブランド名を除いた
-            # カテゴリキーワードで検索し genre_id はレポート側でフィルタする
-            cand_query = category if category else bname
-            print(f"  [candidates] genre_id={gid} keyword='{cand_query}' 候補収集中...")
-            cand_raw = search_items(cand_query, hits=_CANDIDATE_HITS)
-            candidates_raw_items.extend(cand_raw.get("Items", []))
-            time.sleep(_API_WAIT)
+        # ③ 候補収集: category の有無でモードを切り替える
+        #    - category あり → 類似商品検索モード（他ブランドの類似品を探す）
+        #    - category なし → 人気順モード（ブランド自身の商品をそのまま返す）
+        if category:
+            mode = "similar"
+            candidates_raw_items: list[dict[str, Any]] = []
+            for gid in top_genres:
+                print(f"  [candidates] genre_id={gid} keyword='{category}' 候補収集中...")
+                cand_raw = search_items(category, hits=_CANDIDATE_HITS)
+                candidates_raw_items.extend(cand_raw.get("Items", []))
+                time.sleep(_API_WAIT)
 
-        # 重複除去（itemCode ベース）
-        seen_ids: set[str] = set()
-        deduped: list[dict[str, Any]] = []
-        for raw_item in candidates_raw_items:
-            item_code = raw_item.get("Item", raw_item).get("itemCode", "")
-            if item_code and item_code not in seen_ids:
-                seen_ids.add(item_code)
-                deduped.append(raw_item)
+            # 重複除去（itemCode ベース）
+            seen_ids: set[str] = set()
+            deduped: list[dict[str, Any]] = []
+            for raw_item in candidates_raw_items:
+                item_code = raw_item.get("Item", raw_item).get("itemCode", "")
+                if item_code and item_code not in seen_ids:
+                    seen_ids.add(item_code)
+                    deduped.append(raw_item)
 
-        # ブランド自身の商品を候補から除外（ブランド名トークンが一致しすぎるもの）
-        brand_token_re = re.compile(re.escape(bname), re.IGNORECASE)
-        filtered = [
-            it for it in deduped
-            if not brand_token_re.search(it.get("Item", it).get("itemName", ""))
-        ]
+            # ブランド自身の商品を候補から除外
+            brand_token_re = re.compile(re.escape(bname), re.IGNORECASE)
+            final_items = [
+                it for it in deduped
+                if not brand_token_re.search(it.get("Item", it).get("itemName", ""))
+            ]
+        else:
+            # カテゴリ未指定: ブランド自身の人気商品をそのまま返す（API の返却順 = 人気順）
+            mode = "popular"
+            final_items = brand_raw.get("Items", [])
+            print(f"  ℹ category 未指定: ブランド商品 {len(final_items)} 件を人気順で返します")
 
-        # candidates を保存
-        cand_payload = {"brand": bname, "profile": {
+        # candidates を保存（mode フィールドでレポート側が出力を切り替える）
+        cand_payload = {"brand": bname, "mode": mode, "profile": {
             "price_min": profile["price_min"],
             "price_max": profile["price_max"],
             "price_median": profile["price_median"],
             "genre_ids": profile["genre_ids"],
-        }, "Items": filtered}
+        }, "Items": final_items}
 
         cand_file = RAW_DIR / f"brand_candidates_{slug}_{date}.json"
         cand_file.write_text(
             json.dumps(cand_payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        print(f"  → {cand_file.relative_to(ROOT)} ({len(filtered)} candidates)")
+        print(f"  → {cand_file.relative_to(ROOT)} ({len(final_items)} items, mode={mode})")
 
 
 if __name__ == "__main__":

@@ -84,10 +84,21 @@ def _load_brand_files() -> list[dict[str, Any]]:
         ...
     ]
     """
-    token_re = re.compile(r"[0-9A-Za-z\u3040-\u30ff\u4e00-\u9fff]+")
+    token_re  = re.compile(r"[0-9A-Za-z\u3040-\u30ff\u4e00-\u9fff]+")
+    date_re   = re.compile(r"^brand_candidates_(.+)_(\d{8})$")
     result: list[dict[str, Any]] = []
 
-    for cand_path in sorted(RAW_DIR.glob("brand_candidates_*.json")):
+    # ブランドごとに最新日付のファイルだけ使う
+    latest_per_brand: dict[str, tuple[Path, str]] = {}
+    for p in RAW_DIR.glob("brand_candidates_*.json"):
+        m = date_re.match(p.stem)
+        if not m:
+            continue
+        brand_slug, date_str = m.group(1), m.group(2)
+        if brand_slug not in latest_per_brand or date_str > latest_per_brand[brand_slug][1]:
+            latest_per_brand[brand_slug] = (p, date_str)
+
+    for cand_path, _ in sorted(latest_per_brand.values(), key=lambda x: x[0].name):
         data = json.loads(cand_path.read_text(encoding="utf-8"))
         brand_name = data.get("brand", cand_path.stem)
         profile    = data.get("profile", {})
@@ -113,6 +124,7 @@ def _load_brand_files() -> list[dict[str, Any]]:
 
         result.append({
             "brand":       brand_name,
+            "mode":        data.get("mode", "similar"),   # "popular" or "similar"
             "profile":     profile,
             "name_tokens": name_tokens,
             "candidates":  candidates,
@@ -224,7 +236,7 @@ def _write_markdown(
     ranking:        list[dict[str, Any]],
     search:         list[dict[str, Any]],
     similar_by_ref: list[tuple[dict[str, Any], list[dict[str, Any]]]],
-    brand_results:  list[tuple[str, dict[str, Any], list[dict[str, Any]]]],
+    brand_results:  list[tuple[str, str, dict[str, Any], list[dict[str, Any]]]],
     out: Path,
 ) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -275,20 +287,34 @@ def _write_markdown(
         lines.append("")
 
     # ── ブランド類似候補 ──
-    lines.append("## ブランド類似候補（brand_queries 基準）")
+    lines.append("## ブランド情報（brand_queries 基準）")
     if brand_results:
-        for brand_name, profile, candidates in brand_results:
+        for brand_name, mode, profile, candidates in brand_results:
             p_min = f"{profile.get('price_min', '-'):,}" if isinstance(profile.get('price_min'), int) else "-"
             p_max = f"{profile.get('price_max', '-'):,}" if isinstance(profile.get('price_max'), int) else "-"
-            lines.append(
-                f"### ブランド: {brand_name} "
-                f"（価格帯 ¥{p_min}〜¥{p_max} / genre_ids={profile.get('genre_ids', [])}）"
-            )
-            if not candidates:
-                lines.append("_(スコア1以上の類似候補なし)_")
+
+            if mode == "popular":
+                # カテゴリ未指定: ブランド自身の人気商品を一覧表示
+                lines.append(
+                    f"### {brand_name} の人気商品"
+                    f"（価格帯 ¥{p_min}〜¥{p_max}）"
+                )
+                if not candidates:
+                    lines.append("_(商品データがありません)_")
+                else:
+                    for it in candidates[:10]:
+                        lines.append(_md_item_line(it))
             else:
-                for it in candidates[:10]:
-                    lines.append(_md_similar_line(it))
+                # カテゴリ指定: 類似商品をスコア付きで表示
+                lines.append(
+                    f"### {brand_name} に類似する商品"
+                    f"（価格帯 ¥{p_min}〜¥{p_max} / genre_ids={profile.get('genre_ids', [])}）"
+                )
+                if not candidates:
+                    lines.append("_(スコア1以上の類似候補なし)_")
+                else:
+                    for it in candidates[:10]:
+                        lines.append(_md_similar_line(it))
             lines.append("")
     else:
         lines.append("_(brand_queries が watchlist.yaml にないか、search_brand.py 未実行)_")
@@ -331,25 +357,32 @@ def main() -> None:
 
     # 類似判定 B: brand_queries
     brand_data   = _load_brand_files()
-    brand_results: list[tuple[str, dict[str, Any], list[dict[str, Any]]]] = []
+    brand_results: list[tuple[str, str, dict[str, Any], list[dict[str, Any]]]] = []
     for entry in brand_data:
         bname        = entry["brand"]
+        mode         = entry.get("mode", "similar")
         profile      = entry["profile"]
         name_tokens  = entry["name_tokens"]
         candidates   = entry["candidates"]
 
-        scored: list[dict[str, Any]] = []
-        for cand in candidates:
-            score, rules = score_against_brand(cand, name_tokens, profile)
-            if score <= 0:
-                continue
-            scored.append(
-                {**cand, "similarity_score": score, "matched_rules": rules,
-                 "brand_ref": bname}
-            )
-        scored.sort(key=lambda x: x["similarity_score"], reverse=True)
-        brand_results.append((bname, profile, scored))
-        print(f"  ブランド '{bname}' → 類似候補 {len(scored)} 件")
+        if mode == "popular":
+            # カテゴリ未指定: スコアリングなし、人気順のまま
+            brand_results.append((bname, mode, profile, candidates))
+            print(f"  ブランド '{bname}' → 人気商品 {len(candidates)} 件（popular モード）")
+        else:
+            # 類似モード: スコアリングして絞り込み
+            scored: list[dict[str, Any]] = []
+            for cand in candidates:
+                score, rules = score_against_brand(cand, name_tokens, profile)
+                if score <= 0:
+                    continue
+                scored.append(
+                    {**cand, "similarity_score": score, "matched_rules": rules,
+                     "brand_ref": bname}
+                )
+            scored.sort(key=lambda x: x["similarity_score"], reverse=True)
+            brand_results.append((bname, mode, profile, scored))
+            print(f"  ブランド '{bname}' → 類似候補 {len(scored)} 件（similar モード）")
 
     date    = datetime.now().strftime("%Y%m%d")
     csv_out = PROCESSED_DIR / f"items_{date}.csv"
