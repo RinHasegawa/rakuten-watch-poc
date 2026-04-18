@@ -22,6 +22,7 @@ COLUMNS = [
     "genre_id",
     "url",
     "image_url",
+    "review_count",
     "raw_ref",
 ]
 
@@ -52,5 +53,6 @@ def normalize_rakuten_item(
         "genre_id": int(item.get("genreId")) if item.get("genreId") else None,
         "url": item.get("itemUrl") or "",
         "image_url": image_url,
+        "review_count": int(item.get("reviewCount") or 0),
         "raw_ref": raw_ref,
     }

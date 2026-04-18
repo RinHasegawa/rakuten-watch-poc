@@ -123,17 +123,20 @@ def main() -> None:
     date = datetime.now().strftime("%Y%m%d")
 
     for brand in brand_queries:
-        bname    = brand.get("name", "").strip()
-        category = brand.get("category", "").strip()
+        bname           = brand.get("name", "").strip()
+        category        = brand.get("category", "").strip()
+        brand_sort      = brand.get("sort", "standard")          # 例: "-reviewCount"
+        top_as_ref      = int(brand.get("top_as_reference", 0))  # 上位N件を基準商品として使う
         if not bname:
             continue
 
         slug = _slug(bname)
         query = f"{bname} {category}".strip() if category else bname
 
-        # ① ブランド商品検索
-        print(f"\n[brand] '{query}' 検索中...")
-        brand_raw = search_items(query, hits=_BRAND_HITS)
+        # ① ブランド商品検索（sort 指定あればレビュー数順など）
+        sort_label = f", sort={brand_sort}" if brand_sort != "standard" else ""
+        print(f"\n[brand] '{query}' 検索中...{sort_label}")
+        brand_raw = search_items(query, hits=_BRAND_HITS, sort=brand_sort)
         brand_file = RAW_DIR / f"brand_{slug}_{date}.json"
         brand_file.write_text(
             json.dumps(brand_raw, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -185,13 +188,20 @@ def main() -> None:
             final_items = brand_raw.get("Items", [])
             print(f"  ℹ category 未指定: ブランド商品 {len(final_items)} 件を人気順で返します")
 
-        # candidates を保存（mode フィールドでレポート側が出力を切り替える）
+        # ④ top_as_reference: ブランドの人気上位N件を基準商品として保存
+        #    → make_report.py がこれを reference_items として類似検索に使う
+        top_refs_raw: list[dict[str, Any]] = []
+        if top_as_ref > 0:
+            top_refs_raw = brand_raw.get("Items", [])[:top_as_ref]
+            print(f"  ℹ top_as_reference={top_as_ref}: 上位{top_as_ref}件を類似検索の基準商品として保存")
+
+        # candidates を保存（mode / top_refs フィールドでレポート側が出力を切り替える）
         cand_payload = {"brand": bname, "mode": mode, "profile": {
             "price_min": profile["price_min"],
             "price_max": profile["price_max"],
             "price_median": profile["price_median"],
             "genre_ids": profile["genre_ids"],
-        }, "Items": final_items}
+        }, "top_refs": top_refs_raw, "Items": final_items}
 
         cand_file = RAW_DIR / f"brand_candidates_{slug}_{date}.json"
         cand_file.write_text(

@@ -122,12 +122,20 @@ def _load_brand_files() -> list[dict[str, Any]]:
                 normalize_rakuten_item(raw, rank=None, raw_ref=f"{cand_path.name}#{idx}")
             )
 
+        # top_refs: ブランド人気上位N件（search_brand.py が top_as_reference で保存したもの）
+        top_refs = []
+        for idx, raw in enumerate(data.get("top_refs", [])):
+            top_refs.append(
+                normalize_rakuten_item(raw, rank=idx + 1, raw_ref=f"{cand_path.name}#ref{idx}")
+            )
+
         result.append({
             "brand":       brand_name,
             "mode":        data.get("mode", "similar"),   # "popular" or "similar"
             "profile":     profile,
             "name_tokens": name_tokens,
             "candidates":  candidates,
+            "top_refs":    top_refs,   # 類似検索の基準商品（空リストなら使わない）
         })
 
     return result
@@ -220,7 +228,8 @@ def _write_csv(items: list[dict[str, Any]], out: Path) -> None:
 def _md_item_line(it: dict[str, Any]) -> str:
     rank  = f"#{it['rank']} " if it.get("rank") else ""
     price = f"{it['price']:,}円" if it.get("price") else "-"
-    return f"- {rank}[{it['name']}]({it['url']}) — {price} (genre_id={it.get('genre_id')})"
+    review = f" ⭐{it['review_count']:,}件" if it.get("review_count") else ""
+    return f"- {rank}[{it['name']}]({it['url']}) — {price}{review} (genre_id={it.get('genre_id')})"
 
 
 def _md_similar_line(it: dict[str, Any]) -> str:
@@ -233,10 +242,11 @@ def _md_similar_line(it: dict[str, Any]) -> str:
 
 
 def _write_markdown(
-    ranking:        list[dict[str, Any]],
-    search:         list[dict[str, Any]],
-    similar_by_ref: list[tuple[dict[str, Any], list[dict[str, Any]]]],
-    brand_results:  list[tuple[str, str, dict[str, Any], list[dict[str, Any]]]],
+    ranking:          list[dict[str, Any]],
+    search:           list[dict[str, Any]],
+    similar_by_ref:   list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    brand_results:    list[tuple[str, str, dict[str, Any], list[dict[str, Any]]]],
+    top_ref_results:  list[tuple[str, list[tuple[dict[str, Any], list[dict[str, Any]]]]]],
     out: Path,
 ) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -320,10 +330,31 @@ def _write_markdown(
         lines.append("_(brand_queries が watchlist.yaml にないか、search_brand.py 未実行)_")
         lines.append("")
 
+    # ── ブランド人気TOP商品に類似する他ブランド商品（top_as_reference 指定時のみ） ──
+    if top_ref_results:
+        lines.append("## ブランド人気TOP商品に類似する他ブランド商品")
+        for brand_name, ref_similar in top_ref_results:
+            lines.append(f"### {brand_name} 人気上位商品を基準とした類似検索")
+            for ref, similar_items in ref_similar:
+                ref_price = f"¥{ref['price']:,}" if ref.get("price") else "-"
+                ref_review = f" / レビュー{ref.get('review_count', 0):,}件" if ref.get("review_count") else ""
+                lines.append(
+                    f"#### 基準: {ref.get('name', '')[:60]}"
+                    f"（{ref_price}{ref_review}、genre_id={ref.get('genre_id')}）"
+                )
+                if not similar_items:
+                    lines.append("_(スコア1以上の類似候補なし)_")
+                else:
+                    for it in similar_items[:5]:
+                        lines.append(_md_similar_line(it))
+                lines.append("")
+        lines.append("")
+
     lines.append("---")
     lines.append(
         "類似ルール A(reference): name_token(+2) / price_near ±20%(+1) / genre_match(+1)  \n"
-        "類似ルール B(brand):     name_token(+2) / price_range(+1) / genre_match(+1)"
+        "類似ルール B(brand):     name_token(+2) / price_range(+1) / genre_match(+1)  \n"
+        "類似ルール C(top_ref):   同上 A と同じルール（top_as_reference 指定ブランドのみ）"
     )
 
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -358,12 +389,16 @@ def main() -> None:
     # 類似判定 B: brand_queries
     brand_data   = _load_brand_files()
     brand_results: list[tuple[str, str, dict[str, Any], list[dict[str, Any]]]] = []
+    # 類似判定 C: brand top_refs → all_items を相手に reference 類似検索
+    top_ref_results: list[tuple[str, list[tuple[dict[str, Any], list[dict[str, Any]]]]]] = []
+
     for entry in brand_data:
         bname        = entry["brand"]
         mode         = entry.get("mode", "similar")
         profile      = entry["profile"]
         name_tokens  = entry["name_tokens"]
         candidates   = entry["candidates"]
+        top_refs     = entry.get("top_refs", [])
 
         if mode == "popular":
             # カテゴリ未指定: スコアリングなし、人気順のまま
@@ -384,12 +419,34 @@ def main() -> None:
             brand_results.append((bname, mode, profile, scored))
             print(f"  ブランド '{bname}' → 類似候補 {len(scored)} 件（similar モード）")
 
+        # 類似判定 C: top_refs が指定されている場合、各基準商品で all_items を類似検索
+        if top_refs:
+            brand_token_re = re.compile(re.escape(bname), re.IGNORECASE)
+            ref_similar: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+            for ref in top_refs:
+                # ブランド自身の商品は除外してスコアリング
+                scored_ref: list[dict[str, Any]] = []
+                for cand in all_items:
+                    if brand_token_re.search(cand.get("name", "")):
+                        continue   # 同ブランド除外
+                    score, rules = score_against_reference(cand, ref)
+                    if score <= 0:
+                        continue
+                    scored_ref.append(
+                        {**cand, "similarity_score": score, "matched_rules": rules,
+                         "reference_id": ref.get("id")}
+                    )
+                scored_ref.sort(key=lambda x: x["similarity_score"], reverse=True)
+                ref_similar.append((ref, scored_ref))
+                print(f"    top_ref '{ref.get('name', '')[:40]}' → 類似 {len(scored_ref)} 件")
+            top_ref_results.append((bname, ref_similar))
+
     date    = datetime.now().strftime("%Y%m%d")
     csv_out = PROCESSED_DIR / f"items_{date}.csv"
     md_out  = REPORTS_DIR   / f"report_{date}.md"
 
     _write_csv(all_items, csv_out)
-    _write_markdown(ranking, search, similar_by_ref, brand_results, md_out)
+    _write_markdown(ranking, search, similar_by_ref, brand_results, top_ref_results, md_out)
 
     print(f"CSV : {csv_out.relative_to(ROOT)}")
     print(f"MD  : {md_out.relative_to(ROOT)}")

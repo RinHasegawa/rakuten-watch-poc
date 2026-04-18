@@ -34,3 +34,5 @@ brand_queries:
     category: ""
   - name: "ma:nyo"
     category: "美容液"
+    sort: "-reviewCount"      # レビュー数が多い順（人気順の近似）
+    top_as_reference: 3       # 上位N件を基準商品として類似検索にも使う

@@ -89,5 +89,11 @@ def get_ranking(genre_id: int | None = None) -> dict[str, Any]:
 
 # ---------- 検索 ----------
 
-def search_items(keyword: str, hits: int = 30) -> dict[str, Any]:
-    return _get(SEARCH_URL, {"keyword": keyword, "hits": hits})
+def search_items(keyword: str, hits: int = 30, sort: str = "standard") -> dict[str, Any]:
+    """商品検索。sort は楽天API の sort パラメータをそのまま渡す。
+    例: "-reviewCount"（レビュー数が多い順）、"-itemPrice"（高い順）
+    """
+    params: dict[str, Any] = {"keyword": keyword, "hits": hits}
+    if sort != "standard":
+        params["sort"] = sort
+    return _get(SEARCH_URL, params)
